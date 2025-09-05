@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Detailed Scan for {{ ip }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body {
+            background-color: #f0f2f5;
+        }
+        .card {
+            border: none;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+        }
+        .card-header i {
+            margin-right: 0.75rem;
+            color: var(--bs-primary);
+        }
+        .header-title {
+            background: linear-gradient(135deg, #0d6efd, #6f42c1);
+            color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        .badge {
+            font-size: 0.9em;
+        }
+        #scan-button {
+            margin-top: 20px;
+        }
+        #results {
+            display: none;
+        }
+        .custom-progress {
+            height: 25px;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .custom-progress-bar {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.5s ease-in-out;
+        }
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-4">
+    <div class="header-title text-center">
+        <h1 class="display-5"><i class="bi bi-file-earmark-medical"></i> Detailed Scan</h1>
+        <p class="lead">Target host: <strong class="font-monospace">{{ ip }}</strong></p>
+    </div>
+
+    <div class="status-card text-center" id="scan-section">
+        <h5><i class="bi bi-graph-up"></i> Scan Status</h5>
+        <button id="scan-button" class="btn btn-primary btn-lg mt-3" onclick="startDetailedScan()">
+            <i class="bi bi-search"></i> Start Detailed Scan
+        </button>
+        <div class="mt-4">
+            <div class="custom-progress mt-3" style="display: none;" id="progress-container">
+                <div id="progress-bar" class="custom-progress-bar progress-bar-striped progress-bar-animated d-flex align-items-center justify-content-center" role="progressbar" style="width: 0%">
+                    <span id="progress-text" class="fw-bold">0%</span>
+                </div>
+            </div>
+            <p id="status-text" class="mt-3 text-center fw-medium">Ready to scan</p>
+            <p id="scan-info" class="text-muted text-center"></p>
+        </div>
+    </div>
+
+    <div id="results">
+        <div class="row">
+            <div class="col-lg-5 mb-4">
+                <div class="card h-100">
+                    <div class="card-header"><i class="bi bi-info-circle-fill"></i>Host Information</div>
+                    <div class="card-body">
+                        <p><strong>Status:</strong> 
+                            <span id="host-status" class="badge bg-success">Up</span>
+                        </p>
+                        
+                        <div id="hostnames">
+                            <p class="mb-0"><strong>Hostnames:</strong></p>
+                            <ul id="hostnames-list" class="list-unstyled ps-3"></ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card h-100 mt-4" id="os-card">
+                    <div class="card-header"><i class="bi bi-display-fill"></i>Operating System</div>
+                    <ul id="os-list" class="list-group list-group-flush"></ul>
+                </div>
+            </div>
+
+            <div class="col-lg-7 mb-4">
+                <div class="card h-100">
+                    <div class="card-header"><i class="bi bi-door-open-fill"></i>Open TCP Ports</div>
+                    <div class="card-body p-0">
+                        <div id="ports-table" class="table-responsive"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-3">
+            <a href="javascript:window.close()" class="btn btn-secondary"><i class="bi bi-x-lg"></i> Close Tab</a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Track scan phases and their progress weights
+const scanPhases = [
+    { name: "Initializing", weight: 5 },
+    { name: "Ping Check", weight: 10 },
+    { name: "Port Scanning", weight: 30 },
+    { name: "Service Detection", weight: 40 },
+    { name: "OS Detection", weight: 10 },
+    { name: "Script Scanning", weight: 5 }
+];
+
+let currentPhase = 0;
+let currentProgress = 0;
+
+function updateProgress(phaseName, progress) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const statusText = document.getElementById('status-text');
+    const scanInfo = document.getElementById('scan-info');
+    
+    progressBar.style.width = progress + '%';
+    progressText.innerText = Math.round(progress) + '%';
+    statusText.innerText = phaseName;
+    scanInfo.innerText = `Phase: ${phaseName}`;
+}
+
+function simulateProgress() {
+    if (currentPhase >= scanPhases.length) {
+        return;
+    }
+    
+    const phase = scanPhases[currentPhase];
+    const phaseProgress = currentProgress;
+    
+    if (phaseProgress < 100) {
+        currentProgress += 5; // Increment progress for this phase
+        const totalProgress = calculateTotalProgress(currentPhase, currentProgress);
+        updateProgress(phase.name, totalProgress);
+        setTimeout(simulateProgress, 200);
+    } else {
+        currentPhase++;
+        currentProgress = 0;
+        setTimeout(simulateProgress, 200);
+    }
+}
+
+function calculateTotalProgress(phaseIndex, phaseProgress) {
+    let total = 0;
+    for (let i = 0; i < phaseIndex; i++) {
+        total += scanPhases[i].weight;
+    }
+    total += (phaseProgress / 100) * scanPhases[phaseIndex].weight;
+    return total;
+}
+
+function startDetailedScan() {
+    document.getElementById('scan-button').disabled = true;
+    document.getElementById('progress-container').style.display = 'block';
+    document.getElementById('status-text').innerText = 'Starting scan...';
+    
+    // Start progress simulation
+    currentPhase = 0;
+    currentProgress = 0;
+    simulateProgress();
+    
+    fetch(`/api/detailed_scan/{{ ip }}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                updateProgress("Complete", 100);
+                setTimeout(() => {
+                    displayResults(data.details);
+                }, 500);
+            } else {
+                document.getElementById('status-text').innerText = 'Error: ' + data.message;
+            }
+        })
+        .catch(error => {
+            document.getElementById('status-text').innerText = 'Error: ' + error;
+        });
+}
+
+function displayResults(details) {
+    // Update host status
+    document.getElementById('host-status').className = details.state === 'up' ? 
+        'badge bg-success' : 'badge bg-danger';
+    document.getElementById('host-status').innerText = details.state;
+    
+    // Update hostnames
+    const hostnamesList = document.getElementById('hostnames-list');
+    if (details.hostnames && details.hostnames.length > 0) {
+        details.hostnames.forEach(host => {
+            const li = document.createElement('li');
+            li.innerHTML = `${host.name} <span class="text-muted">(${host.type})</span>`;
+            hostnamesList.appendChild(li);
+        });
+    } else {
+        document.getElementById('hostnames').style.display = 'none';
+    }
+    
+    // Update OS information
+    const osList = document.getElementById('os-list');
+    if (details.osmatch && details.osmatch.length > 0) {
+        details.osmatch.forEach(match => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                ${match.name}
+                <span class="badge bg-primary rounded-pill">${match.accuracy}%</span>
+            `;
+            osList.appendChild(li);
+        });
+    } else {
+        document.getElementById('os-card').innerHTML = `
+            <div class="card-header"><i class="bi bi-display"></i>Operating System</div>
+            <div class="card-body">
+                <p class="text-muted">No specific OS detected.</p>
+            </div>
+        `;
+    }
+    
+    // Update ports information
+    const portsTable = document.getElementById('ports-table');
+    if (details.tcp && Object.keys(details.tcp).length > 0) {
+        let tableHTML = `
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Port</th>
+                        <th>Service</th>
+                        <th>Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        for (const [port, info] of Object.entries(details.tcp)) {
+            tableHTML += `
+                <tr>
+                    <td><strong>${port}</strong></td>
+                    <td>${info.name}</td>
+                    <td><small class="text-muted">${info.product} ${info.version}</small></td>
+                </tr>
+            `;
+            
+            if (info.script) {
+                tableHTML += `
+                    <tr class="table-info">
+                        <td colspan="3" class="p-3">
+                            <div class="ms-3">
+                                <h6 class="mb-2"><i class="bi bi-file-text"></i> Script Output</h6>
+                `;
+                
+                for (const [script_name, script_output] of Object.entries(info.script)) {
+                    tableHTML += `
+                        <strong>${script_name}:</strong>
+                        <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap;">${script_output}</pre>
+                    `;
+                }
+                
+                tableHTML += `
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+        
+        tableHTML += `
+                </tbody>
+            </table>
+        `;
+        
+        portsTable.innerHTML = tableHTML;
+    } else {
+        portsTable.innerHTML = `
+            <div class="p-4 text-center">
+                <p class="text-muted mb-0">No open TCP ports found.</p>
+            </div>
+        `;
+    }
+    
+    // Show results and hide scan section
+    document.getElementById('scan-section').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
+}
+</script>
+
+</body>
+</html>

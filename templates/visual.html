@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Network Visual Mapper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #0d6efd, #6f42c1);
+        }
+        .main-container {
+            padding: 20px;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        #network {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            background-color: #fff;
+        }
+        .device-icon {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+        .custom-progress {
+            height: 25px;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .custom-progress-bar {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.5s ease-in-out;
+        }
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .node-tooltip {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            max-width: 300px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-diagram-3"></i> Network Visual Mapper
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/"><i class="bi bi-arrow-left"></i> Back to Basic View</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container main-container">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-gear"></i> Scan Controls
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="ip_range" class="form-label">Target IP Range</label>
+                            <input type="text" id="ip_range" class="form-control" placeholder="e.g., 192.168.1.0/24">
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-primary" onclick="startVisualScan()">
+                                <i class="bi bi-search"></i> Start Network Discovery
+                            </button>
+                            <button class="btn btn-secondary" onclick="autoDetectRange()">
+                                <i class="bi bi-house-gear"></i> Auto Detect Network
+                            </button>
+                            <button class="btn btn-warning" onclick="resetScan()">
+                                <i class="bi bi-arrow-clockwise"></i> Reset Scan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <i class="bi bi-info-circle"></i> Legend
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-router device-icon text-primary"></i>
+                            <span>Router/Gateway</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-microsoft device-icon text-success"></i>
+                            <span>Windows Device</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-ubuntu device-icon text-warning"></i>
+                            <span>Linux Device</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-android2 device-icon text-success"></i>
+                            <span>Android Device</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-apple device-icon text-dark"></i>
+                            <span>Apple Device</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-printer device-icon text-secondary"></i>
+                            <span>Printer</span>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="bi bi-camera-video device-icon text-danger"></i>
+                            <span>Camera</span>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-pc device-icon text-info"></i>
+                            <span>Unknown Device</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-card">
+                    <h5><i class="bi bi-graph-up"></i> Scan Status</h5>
+                    <div class="custom-progress mt-3">
+                        <div id="progress-bar" class="custom-progress-bar progress-bar-striped progress-bar-animated d-flex align-items-center justify-content-center" role="progressbar" style="width: 0%">
+                            <span id="progress-text" class="fw-bold">0%</span>
+                        </div>
+                    </div>
+                    <p id="status-text" class="mt-3 text-center fw-medium">Idle</p>
+                    <p id="current-target" class="text-muted text-center mb-1"></p>
+                    <p id="progress-info" class="progress-info text-center"></p>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <i class="bi bi-diagram-3"></i> Network Visualization
+                    </div>
+                    <div class="card-body">
+                        <div id="network"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="node-tooltip" id="node-tooltip" style="display: none;"></div>
+
+    <script>
+        let network = null;
+        let nodes = null;
+        let edges = null;
+        let isScanning = false;
+
+        // Initialize network visualization
+        function initNetwork() {
+            const container = document.getElementById('network');
+            const data = {
+                nodes: new vis.DataSet(),
+                edges: new vis.DataSet()
+            };
+            
+            const options = {
+                nodes: {
+                    shape: 'dot',
+                    size: 30,
+                    font: {
+                        size: 14,
+                        face: 'Tahoma'
+                    },
+                    borderWidth: 2,
+                    shadow: true
+                },
+                edges: {
+                    width: 2,
+                    shadow: true,
+                    smooth: {
+                        enabled: true,
+                        type: 'continuous'
+                    }
+                },
+                physics: {
+                    stabilization: true,
+                    barnesHut: {
+                        gravitationalConstant: -80000,
+                        springConstant: 0.001,
+                        springLength: 200
+                    }
+                },
+                interaction: {
+                    tooltipDelay: 200,
+                    hover: true,
+                    navigationButtons: true,
+                    keyboard: true
+                }
+            };
+            
+            network = new vis.Network(container, data, options);
+            
+            // Handle node clicks
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    showNodeDetails(nodeId);
+                }
+            });
+            
+            // Handle hover events for tooltips
+            network.on("hoverNode", function(params) {
+                const node = nodes.get(params.node);
+                if (node) {
+                    showTooltip(params.event, node);
+                }
+            });
+            
+            network.on("blurNode", function() {
+                hideTooltip();
+            });
+        }
+        
+        // Show tooltip for node
+        function showTooltip(event, node) {
+            const tooltip = document.getElementById('node-tooltip');
+            tooltip.innerHTML = `
+                <strong>${node.label}</strong><br>
+                ${node.title}<br>
+                <button class="btn btn-sm btn-primary mt-2" onclick="scanNode('${node.id}')">
+                    <i class="bi bi-search"></i> Scan Details
+                </button>
+            `;
+            tooltip.style.display = 'block';
+            tooltip.style.left = event.clientX + 10 + 'px';
+            tooltip.style.top = event.clientY + 10 + 'px';
+        }
+        
+        // Hide tooltip
+        function hideTooltip() {
+            const tooltip = document.getElementById('node-tooltip');
+            tooltip.style.display = 'none';
+        }
+        
+        // Scan a specific node
+        function scanNode(ip) {
+            window.open(`/scan_host/${ip}`, '_blank');
+        }
+        
+        // Show node details
+        function showNodeDetails(nodeId) {
+            // For now, just open the detailed scan page
+            scanNode(nodeId);
+        }
+        
+        // Load network graph data
+        function loadNetworkGraph() {
+            fetch('/api/network_graph')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.nodes && data.nodes.length > 0) {
+                        updateNetworkGraph(data);
+                    } else {
+                        // If no graph data, try to build from scan results
+                        buildGraphFromScanResults();
+                    }
+                })
+                .catch(error => {
+                    console.error("Error loading network graph:", error);
+                    // If API fails, try to build from scan results
+                    buildGraphFromScanResults();
+                });
+        }
+        
+        // Update network graph with new data
+        function updateNetworkGraph(graphData) {
+            if (!network) return;
+            
+            // Clear existing data
+            if (nodes) nodes.clear();
+            if (edges) edges.clear();
+            
+            // Create new datasets
+            nodes = new vis.DataSet(graphData.nodes.map(node => ({
+                id: node.id,
+                label: node.label,
+                title: node.title,
+                group: node.group,
+                shape: 'circularImage',
+                image: `https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/bootstrap-icons.svg#${node.icon}`,
+                size: node.group === 'router' ? 40 : 30,
+                color: getNodeColor(node.group)
+            })));
+            
+            edges = new vis.DataSet(graphData.edges);
+            
+            // Update network
+            network.setData({ nodes, edges });
+        }
+        
+        // Get color for node based on group
+        function getNodeColor(group) {
+            const colors = {
+                'router': { background: '#4facfe', border: '#00f2fe' },
+                'windows': { background: '#198754', border: '#0f5132' },
+                'linux': { background: '#ffc107', border: '#fd7e14' },
+                'android': { background: '#198754', border: '#0f5132' },
+                'apple': { background: '#212529', border: '#000' },
+                'printer': { background: '#6c757d', border: '#495057' },
+                'camera': { background: '#dc3545', border: '#b02a37' },
+                'unknown': { background: '#0dcaf0', border: '#0aa2c0' }
+            };
+            
+            return colors[group] || { background: '#0dcaf0', border: '#0aa2c0' };
+        }
+        
+        // Auto detect network range
+        function autoDetectRange() {
+            fetch("/api/localrange")
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("ip_range").value = data.range;
+                });
+        }
+        
+        // Reset scan
+        function resetScan() {
+            fetch("/api/reset_scan", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"}
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById("status-text").innerText = "Scan reset";
+                document.getElementById("progress-bar").style.width = "0%";
+                document.getElementById("progress-text").innerText = "0%";
+                document.getElementById("current-target").innerText = "";
+                document.getElementById("progress-info").innerText = "";
+                isScanning = false;
+                
+                // Clear the network graph
+                if (nodes) nodes.clear();
+                if (edges) edges.clear();
+            });
+        }
+        
+        // Build graph from scan results if the API fails
+        function buildGraphFromScanResults() {
+            fetch("/api/status")
+                .then(res => res.json())
+                .then(data => {
+                    if (data.results.hosts && data.results.hosts.length > 0) {
+                        // Create a simple graph with the discovered hosts
+                        const graphData = {
+                            nodes: [],
+                            edges: []
+                        };
+                        
+                        // Add gateway
+                        fetch("/api/gateway")
+                            .then(res => res.json())
+                            .then(gatewayData => {
+                                const gateway = gatewayData.gateway;
+                                graphData.nodes.push({
+                                    id: gateway,
+                                    label: "Gateway",
+                                    title: `Default Gateway: ${gateway}`,
+                                    group: "router",
+                                    icon: "bi-router"
+                                });
+                                
+                                // Add hosts
+                                data.results.hosts.forEach(host => {
+                                    if (host !== gateway) {
+                                        graphData.nodes.push({
+                                            id: host,
+                                            label: host,
+                                            title: `IP: ${host}\nType: unknown`,
+                                            group: "unknown",
+                                            icon: "bi-pc"
+                                        });
+                                        
+                                        graphData.edges.push({
+                                            from: gateway,
+                                            to: host,
+                                            label: "connected"
+                                        });
+                                    }
+                                });
+                                
+                                updateNetworkGraph(graphData);
+                            });
+                    }
+                });
+        }
+        
+        // Start visual scan
+        function startVisualScan() {
+            if (isScanning) {
+                alert("A scan is already in progress. Please wait for it to complete.");
+                return;
+            }
+            
+            const target = document.getElementById("ip_range").value;
+            if (!target) {
+                alert("Please enter a target IP range.");
+                return;
+            }
+            
+            // Reset first
+            resetScan();
+            
+            // Wait a bit for reset to complete
+            setTimeout(function() {
+                fetch("/api/visual_scan", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({target: target, phase: "Discovery"})
+                })
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("status-text").innerText = "Scan started...";
+                    isScanning = true;
+                    pollStatus();
+                })
+                .catch(error => {
+                    console.error("Error starting scan:", error);
+                    alert("Failed to start scan. Please try again.");
+                });
+            }, 500);
+        }
+        
+        // Poll scan status
+        function pollStatus() {
+            if (!isScanning) return;
+            
+            fetch("/api/status")
+                .then(res => res.json())
+                .then(data => {
+                    const statusText = document.getElementById("status-text");
+                    const progressBar = document.getElementById("progress-bar");
+                    const progressText = document.getElementById("progress-text");
+                    const currentTarget = document.getElementById("current-target");
+                    const progressInfo = document.getElementById("progress-info");
+
+                    statusText.innerText = data.phase + " - " + data.status;
+                    
+                    // Ensure progress is never more than 100%
+                    const progress = Math.min(100, data.progress);
+                    progressBar.style.width = progress + "%";
+                    progressText.innerText = progress + "%";
+                    
+                    if (data.status === "running" && data.current_host) {
+                        currentTarget.innerText = data.current_host;
+                        
+                        // Show progress information if available
+                        if (data.scanned_hosts !== undefined && data.total_hosts !== undefined) {
+                            progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts`;
+                        } else {
+                            progressInfo.innerText = "";
+                        }
+                    } else {
+                        currentTarget.innerText = "";
+                        progressInfo.innerText = "";
+                    }
+
+                    if (data.status === "running") {
+                        setTimeout(pollStatus, 1000);
+                    } else if (data.status === "done") {
+                        statusText.innerText = "Discovery Complete!";
+                        isScanning = false;
+                        
+                        // Load the network graph after scan completes
+                        // Add a small delay to ensure the graph data is ready
+                        setTimeout(function() {
+                            loadNetworkGraph();
+                            // If graph is still empty after a delay, try to build it from scan results
+                            setTimeout(function() {
+                                if (network && (!nodes || nodes.length === 0)) {
+                                    buildGraphFromScanResults();
+                                }
+                            }, 2000);
+                        }, 500);
+                    } else if (data.status.startsWith("error")) {
+                        statusText.innerText = "Error: " + data.status;
+                        progressBar.classList.add("bg-danger");
+                        isScanning = false;
+                    }
+                })
+                .catch(error => {
+                    console.error("Error polling status:", error);
+                    // Retry after a delay
+                    setTimeout(pollStatus, 2000);
+                });
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initNetwork();
+            autoDetectRange();
+        });
+    </script>
+</body>
+</html>

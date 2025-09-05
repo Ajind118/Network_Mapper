@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Network Mapper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        .scan-details-btn {
+            margin-left: 10px;
+        }
+        .progress-info {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        .custom-progress {
+            height: 25px;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .custom-progress-bar {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.5s ease-in-out;
+        }
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .visual-mode-btn {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container py-4">
+    <div class="text-center mb-4">
+        <i class="bi bi-diagram-3-fill" style="font-size: 3rem; color: var(--bs-primary);"></i>
+        <h2 class="mt-2">Network Mapper</h2>
+        <p class="text-muted">Choose your scanning mode</p>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-list-check" style="font-size: 2.5rem; color: var(--bs-primary);"></i>
+                    <h4 class="my-3">Basic Mapping</h4>
+                    <p class="text-muted">Traditional list-based network discovery with detailed host information</p>
+                    
+                    <div class="mb-3">
+                        <label for="ip_range" class="form-label">Target IP Range or Hostname</label>
+                        <input type="text" id="ip_range" class="form-control" placeholder="e.g., 192.168.1.0/24 or scanme.nmap.org">
+                    </div>
+                    <div class="d-flex gap-2 justify-content-center">
+                        <button class="btn btn-primary" onclick="startScan('Discovery')"><i class="bi bi-search"></i> Discover Hosts</button>
+                        <button class="btn btn-secondary" onclick="getLocalRange()"><i class="bi bi-house-gear"></i> Auto Local Range</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-diagram-3" style="font-size: 2.5rem; color: var(--bs-success);"></i>
+                    <h4 class="my-3">Visual Mapping</h4>
+                    <p class="text-muted">Interactive network graph with device icons and visual connections</p>
+                    <a href="/visual" class="btn btn-success visual-mode-btn">
+                        <i class="bi bi-graph-up"></i> Launch Visual Mapper
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4 status-card">
+        <h5><i class="bi bi-graph-up"></i> Scan Status</h5>
+        <div class="custom-progress mt-3">
+            <div id="progress-bar" class="custom-progress-bar progress-bar-striped progress-bar-animated d-flex align-items-center justify-content-center" role="progressbar" style="width: 0%">
+                <span id="progress-text" class="fw-bold">0%</span>
+            </div>
+        </div>
+        <p id="status-text" class="mt-3 text-center fw-medium">Idle</p>
+        <p id="current-target" class="text-muted text-center mb-1"></p>
+        <p id="progress-info" class="progress-info text-center"></p>
+    </div>
+
+    <div class="mt-4">
+        <h5><i class="bi bi-list-check"></i> Results</h5>
+        <ul id="results" class="list-group shadow-sm"></ul>
+    </div>
+</div>
+
+<script>
+let isScanning = false;
+
+function getLocalRange() {
+    fetch("/api/localrange")
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById("ip_range").value = data.range;
+        });
+}
+
+function startScan(phase) {
+    if (isScanning) {
+        alert("A scan is already in progress. Please wait for it to complete.");
+        return;
+    }
+    
+    const target = document.getElementById("ip_range").value;
+    if (!target) {
+        alert("Please enter a target IP range.");
+        return;
+    }
+    
+    // Reset the scan data first
+    fetch("/api/reset_scan", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"}
+    })
+    .then(() => {
+        fetch("/api/scan", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({target: target, phase: phase})
+        })
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById("status-text").innerText = "Scan started...";
+            document.getElementById("results").innerHTML = '<li class="list-group-item">Scanning...</li>';
+            isScanning = true;
+            pollStatus();
+        });
+    });
+}
+
+function pollStatus() {
+    if (!isScanning) return;
+    
+    fetch("/api/status")
+        .then(res => res.json())
+        .then(data => {
+            const statusText = document.getElementById("status-text");
+            const progressBar = document.getElementById("progress-bar");
+            const progressText = document.getElementById("progress-text");
+            const currentTarget = document.getElementById("current-target");
+            const progressInfo = document.getElementById("progress-info");
+
+            statusText.innerText = data.phase + " - " + data.status;
+            
+            // Ensure progress is never more than 100%
+            const progress = Math.min(100, data.progress);
+            progressBar.style.width = progress + "%";
+            progressText.innerText = progress + "%";
+            
+            if (data.status === "running" && data.current_host) {
+                currentTarget.innerText = data.current_host;
+                
+                // Show progress information if available
+                if (data.scanned_hosts !== undefined && data.total_hosts !== undefined) {
+                    progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts`;
+                } else {
+                    progressInfo.innerText = "";
+                }
+            } else {
+                currentTarget.innerText = "";
+                progressInfo.innerText = "";
+            }
+
+            if (data.status === "running") {
+                setTimeout(pollStatus, 1000);
+            } else if (data.status === "done") {
+                statusText.innerText = "Discovery Complete!";
+                isScanning = false;
+                const resultsElem = document.getElementById("results");
+                resultsElem.innerHTML = "";
+                if (data.results.hosts && data.results.hosts.length > 0) {
+                    data.results.hosts.forEach(host => {
+                        let li = document.createElement("li");
+                        li.className = "list-group-item";
+                        li.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-pc-display-horizontal text-primary"></i> ${host}</span>
+                                <div>
+                                    <button onclick="openScanPage('${host}')" class="btn btn-sm btn-outline-primary scan-details-btn">
+                                        Scan Details <i class="bi bi-search"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        resultsElem.appendChild(li);
+                    });
+                } else {
+                    resultsElem.innerHTML = '<li class="list-group-item">No hosts found. The target might be down or unreachable.</li>';
+                }
+            } else if (data.status.startsWith("error")) {
+                statusText.innerText = "Error: " + data.status;
+                progressBar.classList.add("bg-danger");
+                isScanning = false;
+            }
+        })
+        .catch(error => {
+            console.error("Error polling status:", error);
+            // Retry after a delay
+            setTimeout(pollStatus, 2000);
+        });
+}
+
+function openScanPage(host) {
+    // Open the detailed scan page in a new tab
+    window.open(`/scan_host/${host}`, '_blank');
+}
+</script>
+
+</body>
+</html>
