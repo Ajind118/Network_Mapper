@@ -60,6 +60,10 @@
             z-index: 1000;
             pointer-events: none;
         }
+        .btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
     </style>
 </head>
 <body>
@@ -95,6 +99,16 @@
                             </button>
                             <button class="btn btn-warning" onclick="resetScan()">
                                 <i class="bi bi-arrow-clockwise"></i> Reset Scan
+                            </button>
+                        </div>
+
+                        <!-- Save and View Buttons for Visual Scans -->
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-success" onclick="saveVisualScan()" id="save-visual-btn" disabled>
+                                <i class="bi bi-floppy"></i> Save Visual Result
+                            </button>
+                            <button class="btn btn-info" onclick="showSavedScans()">
+                                <i class="bi bi-clock-history"></i> View Saved Scans
                             </button>
                         </div>
                     </div>
@@ -168,11 +182,30 @@
 
     <div class="node-tooltip" id="node-tooltip" style="display: none;"></div>
 
+    <!-- Saved Scans Modal -->
+    <div class="modal fade" id="savedScansModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-clock-history"></i> Saved Scans</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="saved-scans-list" class="list-group">
+                        <!-- Saved scans will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let network = null;
         let nodes = null;
         let edges = null;
         let isScanning = false;
+        let currentScanId = null;
 
         // Initialize network visualization
         function initNetwork() {
@@ -268,7 +301,6 @@
         
         // Show node details
         function showNodeDetails(nodeId) {
-            // For now, just open the detailed scan page
             scanNode(nodeId);
         }
         
@@ -279,15 +311,10 @@
                 .then(data => {
                     if (data.nodes && data.nodes.length > 0) {
                         updateNetworkGraph(data);
-                    } else {
-                        // If no graph data, try to build from scan results
-                        buildGraphFromScanResults();
                     }
                 })
                 .catch(error => {
                     console.error("Error loading network graph:", error);
-                    // If API fails, try to build from scan results
-                    buildGraphFromScanResults();
                 });
         }
         
@@ -316,6 +343,52 @@
             // Update network
             network.setData({ nodes, edges });
         }
+
+        // Create graph from saved scan data
+        function createGraphFromSavedData(hosts) {
+            fetch("/api/gateway")
+                .then(res => res.json())
+                .then(gatewayData => {
+                    const gateway = gatewayData.gateway;
+                    
+                    const graphData = {
+                        nodes: [],
+                        edges: []
+                    };
+
+                    // Add gateway node
+                    graphData.nodes.push({
+                        id: gateway,
+                        label: "Gateway",
+                        title: `Default Gateway: ${gateway}`,
+                        group: "router",
+                        icon: "bi-router"
+                    });
+
+                    // Add host nodes
+                    hosts.forEach(host => {
+                        if (host.ip_address !== gateway) {
+                            graphData.nodes.push({
+                                id: host.ip_address,
+                                label: host.ip_address,
+                                title: `IP: ${host.ip_address}\nType: ${host.device_type || 'unknown'}`,
+                                group: host.device_type || "unknown",
+                                icon: getDeviceIcon(host.device_type || "unknown")
+                            });
+
+                            graphData.edges.push({
+                                from: gateway,
+                                to: host.ip_address,
+                                label: "connected"
+                            });
+                        }
+                    });
+
+                    updateNetworkGraph(graphData);
+                    new bootstrap.Modal(document.getElementById('savedScansModal')).hide();
+                    alert('Network graph recreated from saved data!');
+                });
+        }
         
         // Get color for node based on group
         function getNodeColor(group) {
@@ -331,6 +404,21 @@
             };
             
             return colors[group] || { background: '#0dcaf0', border: '#0aa2c0' };
+        }
+
+        // Get device icon
+        function getDeviceIcon(deviceType) {
+            const icons = {
+                "router": "bi-router",
+                "windows": "bi-microsoft", 
+                "linux": "bi-ubuntu",
+                "android": "bi-android2",
+                "apple": "bi-apple",
+                "printer": "bi-printer",
+                "camera": "bi-camera-video",
+                "unknown": "bi-pc"
+            };
+            return icons[deviceType] || "bi-pc";
         }
         
         // Auto detect network range
@@ -355,62 +443,15 @@
                 document.getElementById("progress-text").innerText = "0%";
                 document.getElementById("current-target").innerText = "";
                 document.getElementById("progress-info").innerText = "";
+                document.getElementById("save-visual-btn").disabled = true;
+                document.getElementById("save-visual-btn").innerHTML = '<i class="bi bi-floppy"></i> Save Visual Result';
                 isScanning = false;
+                currentScanId = null;
                 
                 // Clear the network graph
                 if (nodes) nodes.clear();
                 if (edges) edges.clear();
             });
-        }
-        
-        // Build graph from scan results if the API fails
-        function buildGraphFromScanResults() {
-            fetch("/api/status")
-                .then(res => res.json())
-                .then(data => {
-                    if (data.results.hosts && data.results.hosts.length > 0) {
-                        // Create a simple graph with the discovered hosts
-                        const graphData = {
-                            nodes: [],
-                            edges: []
-                        };
-                        
-                        // Add gateway
-                        fetch("/api/gateway")
-                            .then(res => res.json())
-                            .then(gatewayData => {
-                                const gateway = gatewayData.gateway;
-                                graphData.nodes.push({
-                                    id: gateway,
-                                    label: "Gateway",
-                                    title: `Default Gateway: ${gateway}`,
-                                    group: "router",
-                                    icon: "bi-router"
-                                });
-                                
-                                // Add hosts
-                                data.results.hosts.forEach(host => {
-                                    if (host !== gateway) {
-                                        graphData.nodes.push({
-                                            id: host,
-                                            label: host,
-                                            title: `IP: ${host}\nType: unknown`,
-                                            group: "unknown",
-                                            icon: "bi-pc"
-                                        });
-                                        
-                                        graphData.edges.push({
-                                            from: gateway,
-                                            to: host,
-                                            label: "connected"
-                                        });
-                                    }
-                                });
-                                
-                                updateNetworkGraph(graphData);
-                            });
-                    }
-                });
         }
         
         // Start visual scan
@@ -425,6 +466,13 @@
                 alert("Please enter a target IP range.");
                 return;
             }
+            
+            // Reset UI first
+            document.getElementById("progress-bar").style.width = "0%";
+            document.getElementById("progress-text").innerText = "0%";
+            document.getElementById("status-text").innerText = "Starting scan...";
+            document.getElementById("save-visual-btn").disabled = true;
+            document.getElementById("save-visual-btn").innerHTML = '<i class="bi bi-floppy"></i> Save Visual Result';
             
             // Reset first
             resetScan();
@@ -474,7 +522,7 @@
                         
                         // Show progress information if available
                         if (data.scanned_hosts !== undefined && data.total_hosts !== undefined) {
-                            progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts`;
+                            progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts - Found ${data.results.hosts ? data.results.hosts.length : 0} devices`;
                         } else {
                             progressInfo.innerText = "";
                         }
@@ -488,22 +536,19 @@
                     } else if (data.status === "done") {
                         statusText.innerText = "Discovery Complete!";
                         isScanning = false;
+                        // Enable the save button
+                        document.getElementById('save-visual-btn').disabled = false;
+                        currentScanId = data.scan_id;
                         
                         // Load the network graph after scan completes
-                        // Add a small delay to ensure the graph data is ready
                         setTimeout(function() {
                             loadNetworkGraph();
-                            // If graph is still empty after a delay, try to build it from scan results
-                            setTimeout(function() {
-                                if (network && (!nodes || nodes.length === 0)) {
-                                    buildGraphFromScanResults();
-                                }
-                            }, 2000);
                         }, 500);
                     } else if (data.status.startsWith("error")) {
                         statusText.innerText = "Error: " + data.status;
                         progressBar.classList.add("bg-danger");
                         isScanning = false;
+                        document.getElementById('save-visual-btn').disabled = true;
                     }
                 })
                 .catch(error => {
@@ -511,6 +556,139 @@
                     // Retry after a delay
                     setTimeout(pollStatus, 2000);
                 });
+        }
+
+        // Save and View functions
+        function saveVisualScan() {
+            const saveBtn = document.getElementById('save-visual-btn');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+            
+            fetch("/api/save_current_scan", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"}
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "success") {
+                    alert("Visual scan saved successfully!");
+                    saveBtn.innerHTML = '<i class="bi bi-check"></i> Saved';
+                } else {
+                    alert("Error saving scan: " + data.message);
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Visual Result';
+                }
+            })
+            .catch(error => {
+                alert("Error saving scan: " + error);
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Visual Result';
+            });
+        }
+        // Save and View functions
+    function saveCurrentScan() {
+        const saveBtn = document.getElementById('save-btn');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+    
+        fetch("/api/save_current_scan", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"}
+        })
+        .then(res => res.json())
+        .then(data => {
+        if (data.status === "success") {
+            alert("Scan saved successfully!");
+            saveBtn.innerHTML = '<i class="bi bi-check"></i> Saved';
+        } else {
+            alert("Error saving scan: " + data.message);
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Result';
+        }
+        })
+        .catch(error => {
+        alert("Error saving scan: " + error);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Result';
+        });
+}
+
+        function showSavedScans() {
+            fetch("/api/saved_scans")
+                .then(res => res.json())
+                .then(data => {
+                    const scansList = document.getElementById('saved-scans-list');
+                    scansList.innerHTML = '';
+                    
+                    if (data.scans && data.scans.length > 0) {
+                        data.scans.forEach(scan => {
+                            const scanItem = document.createElement('div');
+                            scanItem.className = 'list-group-item';
+                            scanItem.innerHTML = `
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">${scan.target_range}</h6>
+                                        <small class="text-muted">
+                                            ${new Date(scan.start_time).toLocaleString()} | 
+                                            Type: ${scan.scan_type} |
+                                            Hosts: ${scan.hosts_found} | 
+                                            Duration: ${scan.duration_seconds}s
+                                        </small>
+                                    </div>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadSavedScan(${scan.id})">
+                                            <i class="bi bi-graph-up"></i> Create Graph
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-info" onclick="viewSavedScanDetails(${scan.id})">
+                                            <i class="bi bi-eye"></i> Details
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="deleteSavedScan(${scan.id})">
+                                            <i class="bi bi-trash"></i> Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            scansList.appendChild(scanItem);
+                        });
+                    } else {
+                        scansList.innerHTML = '<div class="text-center text-muted p-3">No saved scans found</div>';
+                    }
+                    
+                    new bootstrap.Modal(document.getElementById('savedScansModal')).show();
+                });
+        }
+
+        function loadSavedScan(scanId) {
+            fetch(`/api/saved_scan/${scanId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success' && data.scan.hosts) {
+                        createGraphFromSavedData(data.scan.hosts);
+                    } else {
+                        alert('No scan data found');
+                    }
+                });
+        }
+
+        function viewSavedScanDetails(scanId) {
+            window.open(`/saved_scan/${scanId}`, '_blank');
+        }
+
+        function deleteSavedScan(scanId) {
+            if (confirm('Are you sure you want to delete this saved scan?')) {
+                fetch(`/api/delete_scan/${scanId}`, {
+                    method: 'DELETE'
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert('Scan deleted successfully!');
+                        showSavedScans(); // Refresh the list
+                    } else {
+                        alert('Error deleting scan: ' + data.message);
+                    }
+                });
+            }
         }
         
         // Initialize when page loads

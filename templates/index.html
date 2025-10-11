@@ -32,6 +32,10 @@
         .visual-mode-btn {
             margin-top: 10px;
         }
+        .btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -93,10 +97,41 @@
         <h5><i class="bi bi-list-check"></i> Results</h5>
         <ul id="results" class="list-group shadow-sm"></ul>
     </div>
+
+    <!-- Save and View Buttons -->
+    <div class="mt-4">
+        <div class="d-flex gap-2 mb-3">
+            <button class="btn btn-success" onclick="saveCurrentScan()" id="save-btn" disabled>
+                <i class="bi bi-floppy"></i> Save Result
+            </button>
+            <button class="btn btn-info" onclick="showSavedScans()">
+                <i class="bi bi-clock-history"></i> View Saved Results
+            </button>
+        </div>
+    </div>
 </div>
 
+<!-- Saved Results Modal -->
+<div class="modal fade" id="savedScansModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clock-history"></i> Saved Scan Results</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="saved-scans-list" class="list-group">
+                    <!-- Saved scans will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let isScanning = false;
+let currentScanId = null;
 
 function getLocalRange() {
     fetch("/api/localrange")
@@ -117,6 +152,13 @@ function startScan(phase) {
         alert("Please enter a target IP range.");
         return;
     }
+    
+    // Reset UI
+    document.getElementById("progress-bar").style.width = "0%";
+    document.getElementById("progress-text").innerText = "0%";
+    document.getElementById("status-text").innerText = "Starting scan...";
+    document.getElementById("save-btn").disabled = true;
+    document.getElementById("save-btn").innerHTML = '<i class="bi bi-floppy"></i> Save Result';
     
     // Reset the scan data first
     fetch("/api/reset_scan", {
@@ -163,7 +205,7 @@ function pollStatus() {
                 
                 // Show progress information if available
                 if (data.scanned_hosts !== undefined && data.total_hosts !== undefined) {
-                    progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts`;
+                    progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts - Found ${data.results.hosts ? data.results.hosts.length : 0} devices`;
                 } else {
                     progressInfo.innerText = "";
                 }
@@ -177,6 +219,10 @@ function pollStatus() {
             } else if (data.status === "done") {
                 statusText.innerText = "Discovery Complete!";
                 isScanning = false;
+                // Enable the save button
+                document.getElementById('save-btn').disabled = false;
+                currentScanId = data.scan_id;
+                
                 const resultsElem = document.getElementById("results");
                 resultsElem.innerHTML = "";
                 if (data.results.hosts && data.results.hosts.length > 0) {
@@ -202,6 +248,7 @@ function pollStatus() {
                 statusText.innerText = "Error: " + data.status;
                 progressBar.classList.add("bg-danger");
                 isScanning = false;
+                document.getElementById('save-btn').disabled = true;
             }
         })
         .catch(error => {
@@ -214,6 +261,97 @@ function pollStatus() {
 function openScanPage(host) {
     // Open the detailed scan page in a new tab
     window.open(`/scan_host/${host}`, '_blank');
+}
+
+// Save and View functions
+function saveCurrentScan() {
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+    
+    fetch("/api/save_current_scan", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"}
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === "success") {
+            alert("Scan saved successfully!");
+            saveBtn.innerHTML = '<i class="bi bi-check"></i> Saved';
+        } else {
+            alert("Error saving scan: " + data.message);
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Result';
+        }
+    })
+    .catch(error => {
+        alert("Error saving scan: " + error);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Result';
+    });
+}
+
+function showSavedScans() {
+    fetch("/api/saved_scans?type=discovery")
+        .then(res => res.json())
+        .then(data => {
+            const scansList = document.getElementById('saved-scans-list');
+            scansList.innerHTML = '';
+            
+            if (data.scans && data.scans.length > 0) {
+                data.scans.forEach(scan => {
+                    const scanItem = document.createElement('div');
+                    scanItem.className = 'list-group-item';
+                    scanItem.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">${scan.target_range}</h6>
+                                <small class="text-muted">
+                                    ${new Date(scan.start_time).toLocaleString()} | 
+                                    Hosts: ${scan.hosts_found} | 
+                                    Duration: ${scan.duration_seconds}s
+                                </small>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-primary" onclick="viewSavedScan(${scan.id})">
+                                    <i class="bi bi-eye"></i> View
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteSavedScan(${scan.id})">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    scansList.appendChild(scanItem);
+                });
+            } else {
+                scansList.innerHTML = '<div class="text-center text-muted p-3">No saved scans found</div>';
+            }
+            
+            new bootstrap.Modal(document.getElementById('savedScansModal')).show();
+        });
+}
+
+function viewSavedScan(scanId) {
+    // Open in new tab
+    window.open(`/saved_scan/${scanId}`, '_blank');
+}
+
+function deleteSavedScan(scanId) {
+    if (confirm('Are you sure you want to delete this saved scan?')) {
+        fetch(`/api/delete_scan/${scanId}`, {
+            method: 'DELETE'
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Scan deleted successfully!');
+                showSavedScans(); // Refresh the list
+            } else {
+                alert('Error deleting scan: ' + data.message);
+            }
+        });
+    }
 }
 </script>
 
