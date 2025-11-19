@@ -398,24 +398,31 @@
                 return;
             }
             
-            resetScan();
+            // Perform a local UI reset without calling the backend reset endpoint
+            document.getElementById("status-text").innerText = "Idle";
+            const progressBar = document.getElementById("progress-bar");
+            progressBar.style.width = "0%";
+            progressBar.setAttribute("data-progress", 0);
+            document.getElementById("save-visual-btn").disabled = true;
+            isScanning = false;
+            nodes.clear();
+            edges.clear();
             
-            setTimeout(() => {
-                fetch("/api/visual_scan", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({target: target})
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === "error") {
-                        alert(data.message);
-                        return;
-                    }
-                    isScanning = true;
-                    pollStatus();
-                });
-            }, 500);
+            // Directly call the visual scan endpoint
+            fetch("/api/visual_scan", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({target: target})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "error") {
+                    alert(data.message);
+                    return;
+                }
+                isScanning = true;
+                pollStatus();
+            });
         }
         
         function pollStatus() {
