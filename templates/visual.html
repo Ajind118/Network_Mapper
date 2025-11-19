@@ -397,25 +397,21 @@
                 alert("Please enter a target IP range.");
                 return;
             }
-            
-            resetScan();
-            
-            setTimeout(() => {
-                fetch("/api/visual_scan", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({target: target})
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === "error") {
-                        alert(data.message);
-                        return;
-                    }
-                    isScanning = true;
-                    pollStatus();
-                });
-            }, 500);
+
+            fetch("/api/visual_scan", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({target: target})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "error") {
+                    alert(data.message);
+                    return;
+                }
+                isScanning = true;
+                pollStatus(); // Start polling for status updates
+            });
         }
         
         function pollStatus() {
@@ -431,13 +427,17 @@
                     progressBar.style.width = progress + "%";
                     progressBar.setAttribute("data-progress", progress);
                     
+                    const progressInfo = document.getElementById("progress-info");
+
                     statusText.innerText = data.phase ? `${data.phase} - ${data.status}` : data.status;
                     document.getElementById("current-target").innerText = data.current_host || "";
                     
                     if (data.status === "running") {
+                        progressInfo.innerText = `${progress}% - (${data.scanned_hosts || 0}/${data.total_hosts || 0} hosts)`;
                         setTimeout(pollStatus, 1000);
                     } else {
                         isScanning = false;
+                        progressInfo.innerText = ""; // Clear progress text when not running
                         if (data.status === "done") {
                             statusText.innerText = "Discovery Complete!";
                             document.getElementById('save-visual-btn').disabled = false;
@@ -478,7 +478,7 @@ function loadNetworkGraph() {
         }
 
         function showSavedScans() {
-            fetch("/api/saved_scans?type=visual")
+            fetch("/api/saved_scans?type=visual") // Fetch both 'visual' and 'discovery' scans
                 .then(res => res.json())
                 .then(data => {
                     const scansList = document.getElementById('saved-scans-list');
@@ -487,18 +487,30 @@ function loadNetworkGraph() {
                         data.scans.forEach(scan => {
                             const scanItem = document.createElement('div');
                             scanItem.className = 'list-group-item list-group-item-action';
+
+                            // Capitalize scan type for display
+                            const scanTypeDisplay = scan.scan_type.charAt(0).toUpperCase() + scan.scan_type.slice(1);
+
                             scanItem.innerHTML = `
-                                <div class="d-flex justify-content-between">
-                                    <span>${scan.target_range} (${scan.hosts_found} hosts)</span>
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h5 class="mb-1">${scan.target_range}</h5>
                                     <small>${new Date(scan.start_time).toLocaleString()}</small>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadSavedScan(${scan.id})">Load</button>
-                                <button class="btn btn-sm btn-outline-danger mt-2" onclick="deleteSavedScan(${scan.id})">Delete</button>
+                                <p class="mb-1">
+                                    Found ${scan.hosts_found} hosts.
+                                    <span class="badge bg-secondary">${scanTypeDisplay} Scan</span>
+                                </p>
+                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadSavedScan(${scan.id})">
+                                    <i class="bi bi-cloud-download"></i> Load Graph
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger mt-2" onclick="deleteSavedScan(${scan.id})">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
                             `;
                             scansList.appendChild(scanItem);
                         });
                     } else {
-                        scansList.innerHTML = '<p class="text-center">No saved visual scans.</p>';
+                        scansList.innerHTML = '<p class="text-center">No saved discovery or visual scans found.</p>';
                     }
                     new bootstrap.Modal(document.getElementById('savedScansModal')).show();
                 });
