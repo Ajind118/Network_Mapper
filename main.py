@@ -573,7 +573,7 @@ def scan_single_host_fast(host):
         logger.info(f"Scanning host: {host}")
         scanner = nmap.PortScanner()
         # Use more reliable scan parameters
-        result = scanner.scan(hosts=host, arguments="-sn -T4 --max-retries 2 --host-timeout 10s")
+        result = scanner.scan(hosts=host, arguments="-sn -T5 --max-retries 2 --host-timeout 15s")
         is_up = host in scanner.all_hosts()
         logger.info(f"Host {host} is {'up' if is_up else 'down'}")
         return host, is_up
@@ -646,7 +646,7 @@ def perform_discovery_scan(target):
         
         # Use a more reliable scanning method with fewer workers
         logger.info(f"Starting scan with {len(all_hosts)} hosts")
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             future_to_host = {executor.submit(scan_single_host_fast, host): host for host in all_hosts}
             
             for i, future in enumerate(as_completed(future_to_host)):
@@ -772,7 +772,7 @@ def perform_visual_scan(target):
         discovered_hosts = []
         logger.info(f"Starting visual scan with {len(all_hosts)} hosts")
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             future_to_host = {executor.submit(scan_single_host_fast, host): host for host in all_hosts}
             
             for i, future in enumerate(as_completed(future_to_host)):
@@ -953,6 +953,15 @@ def scan():
     if not target:
         return jsonify({"status": "error", "message": "No target specified"}), 400
     
+    reset_scan_data()
+    with scan_lock:
+        scan_data.update({
+            "status": "running",
+            "phase": "Initializing...",
+            "progress": 0,
+            "last_update": time.time()
+        })
+
     # Start scan in background thread
     active_scan_thread = threading.Thread(target=perform_discovery_scan, args=(target,), daemon=True)
     active_scan_thread.start()
