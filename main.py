@@ -278,22 +278,34 @@ def get_saved_scans(scan_type=None):
     
     try:
         cursor = conn.cursor(dictionary=True)
-        if scan_type:
-            cursor.execute('''
+        # Special handling for visual page to show both discovery and visual scans
+        if scan_type == 'visual':
+            query = '''
+                SELECT id, target_range, scan_type, status, hosts_found, 
+                       start_time, end_time, duration_seconds
+                FROM scans 
+                WHERE saved_result = TRUE AND scan_type IN ('discovery', 'visual')
+                ORDER BY start_time DESC
+            '''
+            cursor.execute(query)
+        elif scan_type:
+            query = '''
                 SELECT id, target_range, scan_type, status, hosts_found, 
                        start_time, end_time, duration_seconds
                 FROM scans 
                 WHERE saved_result = TRUE AND scan_type = %s
                 ORDER BY start_time DESC
-            ''', (scan_type,))
+            '''
+            cursor.execute(query, (scan_type,))
         else:
-            cursor.execute('''
+            query = '''
                 SELECT id, target_range, scan_type, status, hosts_found, 
                        start_time, end_time, duration_seconds
                 FROM scans 
                 WHERE saved_result = TRUE
                 ORDER BY start_time DESC
-            ''')
+            '''
+            cursor.execute(query)
         
         return cursor.fetchall()
     except mysql.connector.Error as e:
@@ -705,7 +717,8 @@ def perform_discovery_scan(target):
                     scan_data["current_host"] = f"Scanning: {host}"
                     scan_data["last_update"] = time.time()
 
-                logger.info(f"Progress: {progress}% - Scanned {i+1}/{len(all_hosts)} hosts")
+                if i % 10 == 0:
+                    logger.info(f"Progress: {progress}% - Scanned {i+1}/{len(all_hosts)} hosts")
 
         # Save discovered hosts to database
         if current_scan_id and discovered_hosts:
@@ -854,14 +867,14 @@ def perform_visual_scan(target):
                     logger.error(f"Error scanning {host} in visual scan: {e}")
                 
                 # Update progress
-                progress = min(100, int((i + 1) / len(all_hosts) * 100))
+                progress = min(100, int(((i + 1) / len(all_hosts)) * 100))
                 with scan_lock:
                     scan_data["scanned_hosts"] = i + 1
                     scan_data["progress"] = progress
                     scan_data["current_host"] = f"Scanning: {host}"
                     scan_data["last_update"] = time.time()
 
-                if i % 10 == 0:  # Log every 10 hosts to avoid too much logging
+                if i % 10 == 0:
                     logger.info(f"Visual scan progress: {progress}%")
 
         # Update scan completion
