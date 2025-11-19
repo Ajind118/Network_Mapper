@@ -36,6 +36,13 @@
             cursor: not-allowed;
             opacity: 0.6;
         }
+        .fade-in {
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -91,6 +98,11 @@
         <p id="status-text" class="mt-3 text-center fw-medium">Idle</p>
         <p id="current-target" class="text-muted text-center mb-1"></p>
         <p id="progress-info" class="progress-info text-center"></p>
+        <div id="scan-controls" class="text-center mt-3" style="display: none;">
+            <button class="btn btn-warning btn-sm" onclick="stopScan()">
+                <i class="bi bi-stop-circle"></i> Stop Scan
+            </button>
+        </div>
     </div>
 
     <div class="mt-4">
@@ -132,6 +144,8 @@
 <script>
 let isScanning = false;
 let currentScanId = null;
+let pollInterval = null;
+let lastProgress = 0;
 
 function getLocalRange() {
     fetch("/api/localrange")
@@ -159,6 +173,19 @@ function startScan(phase) {
     document.getElementById("status-text").innerText = "Starting scan...";
     document.getElementById("save-btn").disabled = true;
     document.getElementById("save-btn").innerHTML = '<i class="bi bi-floppy"></i> Save Result';
+    document.getElementById("scan-controls").style.display = "block";
+    document.getElementById("results").innerHTML = "";
+    
+    isScanning = true;
+    lastProgress = 0;
+    
+    // Clear any existing interval
+    if (pollInterval) {
+        clearInterval(pollInterval);
+    }
+    
+    // Start polling immediately
+    pollInterval = setInterval(pollStatus, 1000);
     
     // Reset the scan data first
     fetch("/api/reset_scan", {
@@ -173,18 +200,50 @@ function startScan(phase) {
         })
         .then(res => res.json())
         .then(data => {
-            document.getElementById("status-text").innerText = "Scan started...";
-            document.getElementById("results").innerHTML = '<li class="list-group-item">Scanning...</li>';
-            isScanning = true;
-            pollStatus();
+            if (data.status === "error") {
+                alert("Error starting scan: " + data.message);
+                isScanning = false;
+                clearInterval(pollInterval);
+                document.getElementById("scan-controls").style.display = "none";
+            } else {
+                document.getElementById("status-text").innerText = "Scan started...";
+            }
+        })
+        .catch(error => {
+            console.error("Error starting scan:", error);
+            alert("Error starting scan: " + error);
+            isScanning = false;
+            clearInterval(pollInterval);
+            document.getElementById("scan-controls").style.display = "none";
         });
+    })
+    .catch(error => {
+        console.error("Error resetting scan:", error);
+        alert("Error resetting scan: " + error);
+        isScanning = false;
+        clearInterval(pollInterval);
+        document.getElementById("scan-controls").style.display = "none";
     });
+}
+
+function stopScan() {
+    if (!isScanning) return;
+    
+    if (confirm('Are you sure you want to stop the current scan?')) {
+        isScanning = false;
+        if (pollInterval) {
+            clearInterval(pollInterval);
+        }
+        document.getElementById("scan-controls").style.display = "none";
+        document.getElementById("status-text").innerText = "Scan stopped by user";
+        document.getElementById("progress-bar").classList.remove("progress-bar-animated");
+    }
 }
 
 function pollStatus() {
     if (!isScanning) return;
     
-    fetch("/api/status")
+    fetch("/api/status?" + new Date().getTime()) // Prevent caching
         .then(res => res.json())
         .then(data => {
             const statusText = document.getElementById("status-text");
@@ -193,19 +252,26 @@ function pollStatus() {
             const currentTarget = document.getElementById("current-target");
             const progressInfo = document.getElementById("progress-info");
 
-            statusText.innerText = data.phase + " - " + data.status;
+            // Update status and progress
+            statusText.innerText = (data.phase || "Scanning") + " - " + (data.status || "running");
             
             // Ensure progress is never more than 100%
-            const progress = Math.min(100, data.progress);
-            progressBar.style.width = progress + "%";
-            progressText.innerText = progress + "%";
+            const progress = Math.min(100, data.progress || 0);
+            
+            // Only update if progress actually changed
+            if (progress !== lastProgress) {
+                progressBar.style.width = progress + "%";
+                progressText.innerText = progress + "%";
+                lastProgress = progress;
+            }
             
             if (data.status === "running" && data.current_host) {
                 currentTarget.innerText = data.current_host;
                 
                 // Show progress information if available
                 if (data.scanned_hosts !== undefined && data.total_hosts !== undefined) {
-                    progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts - Found ${data.results.hosts ? data.results.hosts.length : 0} devices`;
+                    const foundCount = data.results && data.results.hosts ? data.results.hosts.length : 0;
+                    progressInfo.innerText = `Scanned ${data.scanned_hosts} of ${data.total_hosts} hosts - Found ${foundCount} devices`;
                 } else {
                     progressInfo.innerText = "";
                 }
@@ -214,21 +280,25 @@ function pollStatus() {
                 progressInfo.innerText = "";
             }
 
-            if (data.status === "running") {
-                setTimeout(pollStatus, 1000);
-            } else if (data.status === "done") {
+            if (data.status === "done") {
                 statusText.innerText = "Discovery Complete!";
                 isScanning = false;
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                }
+                document.getElementById("scan-controls").style.display = "none";
+                
                 // Enable the save button
                 document.getElementById('save-btn').disabled = false;
                 currentScanId = data.scan_id;
                 
                 const resultsElem = document.getElementById("results");
                 resultsElem.innerHTML = "";
-                if (data.results.hosts && data.results.hosts.length > 0) {
+                
+                if (data.results && data.results.hosts && data.results.hosts.length > 0) {
                     data.results.hosts.forEach(host => {
                         let li = document.createElement("li");
-                        li.className = "list-group-item";
+                        li.className = "list-group-item fade-in";
                         li.innerHTML = `
                             <div class="d-flex justify-content-between align-items-center">
                                 <span><i class="bi bi-pc-display-horizontal text-primary"></i> ${host}</span>
@@ -244,17 +314,20 @@ function pollStatus() {
                 } else {
                     resultsElem.innerHTML = '<li class="list-group-item">No hosts found. The target might be down or unreachable.</li>';
                 }
-            } else if (data.status.startsWith("error")) {
+            } else if (data.status && data.status.startsWith("error")) {
                 statusText.innerText = "Error: " + data.status;
                 progressBar.classList.add("bg-danger");
                 isScanning = false;
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                }
                 document.getElementById('save-btn').disabled = true;
+                document.getElementById("scan-controls").style.display = "none";
             }
         })
         .catch(error => {
             console.error("Error polling status:", error);
-            // Retry after a delay
-            setTimeout(pollStatus, 2000);
+            // Don't stop polling on network errors - retry will happen automatically
         });
 }
 
@@ -353,6 +426,11 @@ function deleteSavedScan(scanId) {
         });
     }
 }
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    getLocalRange();
+});
 </script>
 
 </body>

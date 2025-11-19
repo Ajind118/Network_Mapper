@@ -64,6 +64,17 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             margin-bottom: 20px;
         }
+        .save-section {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 2px dashed #28a745;
+        }
+        .port-badge {
+            font-family: monospace;
+            font-size: 0.85em;
+        }
     </style>
 </head>
 <body>
@@ -94,8 +105,9 @@
         <div class="row">
             <div class="col-lg-5 mb-4">
                 <div class="card h-100">
-                    <div class="card-header"><i class="bi bi-info-circle-fill"></i>Host Information</div>
+                    <div class="card-header"><i class="bi bi-info-circle-fill"></i> Host Information</div>
                     <div class="card-body">
+                        <p><strong>IP Address:</strong> <code>{{ ip }}</code></p>
                         <p><strong>Status:</strong> 
                             <span id="host-status" class="badge bg-success">Up</span>
                         </p>
@@ -108,23 +120,55 @@
                 </div>
 
                 <div class="card h-100 mt-4" id="os-card">
-                    <div class="card-header"><i class="bi bi-display-fill"></i>Operating System</div>
-                    <ul id="os-list" class="list-group list-group-flush"></ul>
+                    <div class="card-header"><i class="bi bi-display-fill"></i> Operating System Detection</div>
+                    <div class="card-body">
+                        <div id="os-detection-status" class="text-muted mb-3">Attempting OS detection...</div>
+                        <ul id="os-list" class="list-group list-group-flush"></ul>
+                    </div>
+                </div>
+
+                <div class="card h-100 mt-4" id="services-summary-card">
+                    <div class="card-header"><i class="bi bi-collection-fill"></i> Services Summary</div>
+                    <div class="card-body">
+                        <div id="services-summary" class="d-flex flex-wrap gap-2">
+                            <!-- Service badges will be added here -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div class="col-lg-7 mb-4">
                 <div class="card h-100">
-                    <div class="card-header"><i class="bi bi-door-open-fill"></i>Open TCP Ports</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-door-open-fill"></i> Open TCP Ports</span>
+                        <span id="ports-count" class="badge bg-primary">0 ports</span>
+                    </div>
                     <div class="card-body p-0">
-                        <div id="ports-table" class="table-responsive"></div>
+                        <div id="ports-table" class="table-responsive">
+                            <div class="p-4 text-center">
+                                <p class="text-muted mb-0">Scanning for open ports...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
         
-        <div class="text-center mt-3">
+        <!-- Save Section -->
+        <div class="save-section text-center" id="save-section" style="display: none;">
+            <h5><i class="bi bi-floppy-fill text-success"></i> Save Scan Results</h5>
+            <p class="text-muted">Save these detailed results to the database for future reference</p>
+            <button id="save-detailed-btn" class="btn btn-success btn-lg" onclick="saveDetailedScan()">
+                <i class="bi bi-floppy"></i> Save Detailed Results
+            </button>
+            <div id="save-status" class="mt-3"></div>
+        </div>
+        
+        <div class="text-center mt-4">
             <a href="javascript:window.close()" class="btn btn-secondary"><i class="bi bi-x-lg"></i> Close Tab</a>
+            <button onclick="startDetailedScan()" class="btn btn-outline-primary ms-2">
+                <i class="bi bi-arrow-repeat"></i> Rescan
+            </button>
         </div>
     </div>
 </div>
@@ -132,6 +176,7 @@
 <script>
 let progressInterval;
 let isScanFinished = false;
+let currentScanResults = null;
 
 function pollDetailedProgress() {
     const ip = "{{ ip }}";
@@ -158,6 +203,7 @@ function pollDetailedProgress() {
                 } else {
                     statusText.innerText = 'Error: ' + data.error;
                     progressBar.classList.add('bg-danger');
+                    document.getElementById('progress-container').style.display = 'block';
                 }
             }
         })
@@ -171,13 +217,14 @@ function startDetailedScan() {
     document.getElementById('scan-button').disabled = true;
     document.getElementById('scan-button').innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Scanning...';
     document.getElementById('progress-container').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('save-section').style.display = 'none';
     
     isScanFinished = false;
 
     // Start polling for progress updates every second
     progressInterval = setInterval(pollDetailedProgress, 1000);
     
-    // *** FIX: Changed from GET to POST to match the server API ***
     fetch(`/api/detailed_scan/{{ ip }}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -199,8 +246,10 @@ function startDetailedScan() {
     });
 }
 
-
 function displayResults(details) {
+    // Store results for saving
+    currentScanResults = details;
+    
     document.getElementById('host-status').className = details.state === 'up' ? 
         'badge bg-success' : 'badge bg-danger';
     document.getElementById('host-status').innerText = details.state || 'unknown';
@@ -211,7 +260,7 @@ function displayResults(details) {
         document.getElementById('hostnames').style.display = 'block';
         details.hostnames.forEach(host => {
             const li = document.createElement('li');
-            li.innerHTML = `${host.name} <span class="text-muted">(${host.type})</span>`;
+            li.innerHTML = `<span class="font-monospace">${host.name}</span> <span class="text-muted">(${host.type})</span>`;
             hostnamesList.appendChild(li);
         });
     } else {
@@ -219,43 +268,74 @@ function displayResults(details) {
     }
     
     const osList = document.getElementById('os-list');
+    const osDetectionStatus = document.getElementById('os-detection-status');
     osList.innerHTML = ''; // Clear previous results
     if (details.osmatch && details.osmatch.length > 0) {
         document.getElementById('os-card').style.display = 'block';
-        details.osmatch.forEach(match => {
+        osDetectionStatus.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> OS detection successful</span>`;
+        
+        // Show top 3 most accurate matches
+        const topMatches = details.osmatch.slice(0, 3);
+        topMatches.forEach(match => {
             const li = document.createElement('li');
             li.className = 'list-group-item d-flex justify-content-between align-items-center';
             li.innerHTML = `
-                ${match.name}
+                <div>
+                    <strong>${match.name}</strong>
+                    <br><small class="text-muted">${match.osclass && match.osclass[0] ? match.osclass[0].osfamily : 'Unknown family'}</small>
+                </div>
                 <span class="badge bg-primary rounded-pill">${match.accuracy}%</span>
             `;
             osList.appendChild(li);
         });
     } else {
-        // Just hide it instead of replacing innerHTML
-        document.getElementById('os-card').style.display = 'none';
+        document.getElementById('os-card').style.display = 'block';
+        osDetectionStatus.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> OS detection failed or inconclusive</span>`;
+        const li = document.createElement('li');
+        li.className = 'list-group-item text-muted text-center';
+        li.innerText = 'No OS information available';
+        osList.appendChild(li);
     }
     
     const portsTable = document.getElementById('ports-table');
+    const portsCount = document.getElementById('ports-count');
+    const servicesSummary = document.getElementById('services-summary');
+    
     if (details.tcp && Object.keys(details.tcp).length > 0) {
+        const openPorts = Object.keys(details.tcp).length;
+        portsCount.innerText = `${openPorts} port${openPorts !== 1 ? 's' : ''}`;
+        
         let tableHTML = `
             <table class="table table-hover table-striped mb-0">
                 <thead class="table-light">
                     <tr>
                         <th>Port</th>
                         <th>Service</th>
-                        <th>Version</th>
+                        <th>State</th>
+                        <th>Version Information</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
         
+        // Track unique services for summary
+        const serviceCounts = {};
+        
         for (const [port, info] of Object.entries(details.tcp)) {
+            const serviceName = info.name || 'unknown';
+            serviceCounts[serviceName] = (serviceCounts[serviceName] || 0) + 1;
+            
             tableHTML += `
                 <tr>
-                    <td><strong>${port}</strong></td>
-                    <td>${info.name || ''}</td>
-                    <td><small class="text-muted">${info.product || ''} ${info.version || ''}</small></td>
+                    <td><strong class="port-badge">${port}/tcp</strong></td>
+                    <td>${serviceName}</td>
+                    <td><span class="badge bg-success">${info.state}</span></td>
+                    <td>
+                        <small class="text-muted">
+                            ${info.product || ''} ${info.version || ''} 
+                            ${info.extrainfo ? `<br><em>${info.extrainfo}</em>` : ''}
+                        </small>
+                    </td>
                 </tr>
             `;
         }
@@ -265,17 +345,101 @@ function displayResults(details) {
             </table>
         `;
         portsTable.innerHTML = tableHTML;
+        
+        // Update services summary
+        servicesSummary.innerHTML = '';
+        Object.entries(serviceCounts).forEach(([service, count]) => {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-info port-badge';
+            badge.innerText = `${service} (${count})`;
+            servicesSummary.appendChild(badge);
+        });
+        
+        document.getElementById('services-summary-card').style.display = 'block';
     } else {
         portsTable.innerHTML = `
             <div class="p-4 text-center">
                 <p class="text-muted mb-0">No open TCP ports found.</p>
             </div>
         `;
+        portsCount.innerText = '0 ports';
+        servicesSummary.innerHTML = '<span class="text-muted">No services detected</span>';
+        document.getElementById('services-summary-card').style.display = 'block';
     }
     
     document.getElementById('scan-section').style.display = 'none';
     document.getElementById('results').style.display = 'block';
+    document.getElementById('save-section').style.display = 'block';
 }
+
+function saveDetailedScan() {
+    const saveBtn = document.getElementById('save-detailed-btn');
+    const saveStatus = document.getElementById('save-status');
+    
+    if (!currentScanResults) {
+        saveStatus.innerHTML = '<div class="alert alert-warning">No scan results to save. Please run a scan first.</div>';
+        return;
+    }
+    
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+    
+    // Prepare data for saving
+    const saveData = {
+        results: currentScanResults,
+        hostname: currentScanResults.hostnames && currentScanResults.hostnames.length > 0 ? 
+                 currentScanResults.hostnames[0].name : '',
+        state: currentScanResults.state || 'unknown',
+        device_type: 'unknown',
+        os_info: currentScanResults.osmatch && currentScanResults.osmatch.length > 0 ? 
+                currentScanResults.osmatch[0].name : 'Unknown'
+    };
+    
+    fetch(`/api/save_detailed_scan/{{ ip }}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(saveData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            saveStatus.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> 
+                    <strong>Scan saved successfully!</strong><br>
+                    <small>Scan ID: ${data.scan_id}</small>
+                </div>
+            `;
+            saveBtn.innerHTML = '<i class="bi bi-check"></i> Saved';
+            
+            // Add view button after successful save
+            setTimeout(() => {
+                const viewButton = document.createElement('a');
+                viewButton.href = `/saved_scan/${data.scan_id}`;
+                viewButton.target = '_blank';
+                viewButton.className = 'btn btn-outline-primary btn-sm mt-2';
+                viewButton.innerHTML = '<i class="bi bi-eye"></i> View Saved Scan';
+                saveStatus.appendChild(viewButton);
+            }, 1000);
+        } else {
+            saveStatus.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${data.message}</div>`;
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Detailed Results';
+        }
+    })
+    .catch(error => {
+        saveStatus.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Save failed: ${error}</div>`;
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Detailed Results';
+    });
+}
+
+// Initialize tooltips if any
+document.addEventListener('DOMContentLoaded', function() {
+    // Any initialization code can go here
+});
 </script>
 
 </body>
