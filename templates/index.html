@@ -59,8 +59,8 @@
                         <label for="ip_range" class="form-label">Target IP Range or Hostname</label>
                         <input type="text" id="ip_range" class="form-control" placeholder="e.g., 192.168.1.0/24 or scanme.nmap.org">
                     </div>
-                    <div class="d-flex gap-2 justify-content-center">
-                        <button class="btn btn-primary" onclick="startScan('Discovery')"><i class="bi bi-search"></i> Discover Hosts</button>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary btn-lg shadow-sm" onclick="startScan('Discovery')"><i class="bi bi-search"></i> Discover Hosts</button>
                         <button class="btn btn-secondary" onclick="getLocalRange()"><i class="bi bi-house-gear"></i> Auto Local Range</button>
                     </div>
                 </div>
@@ -245,7 +245,12 @@ function pollStatus() {
                     resultsElem.innerHTML = '<li class="list-group-item">No hosts found. The target might be down or unreachable.</li>';
                 }
             } else if (data.status.startsWith("error")) {
-                statusText.innerText = "Error: " + data.status;
+                if (data.status.includes("nmap")) {
+                    statusText.innerHTML = `<strong>Error:</strong> 'nmap' is not installed. Please <a href="https://nmap.org/download.html" target="_blank" class="alert-link">install nmap</a> and restart the application.`;
+                    statusText.className = 'mt-3 text-center fw-medium alert alert-danger';
+                } else {
+                    statusText.innerText = "Error: " + data.status;
+                }
                 progressBar.classList.add("bg-danger");
                 isScanning = false;
                 document.getElementById('save-btn').disabled = true;

@@ -545,7 +545,12 @@
                             loadNetworkGraph();
                         }, 500);
                     } else if (data.status.startsWith("error")) {
-                        statusText.innerText = "Error: " + data.status;
+                        if (data.status.includes("nmap")) {
+                            statusText.innerHTML = `<strong>Error:</strong> 'nmap' is not installed. Please <a href="https://nmap.org/download.html" target="_blank" class="alert-link">install nmap</a> and restart the application.`;
+                            statusText.className = 'mt-3 text-center fw-medium alert alert-danger';
+                        } else {
+                            statusText.innerText = "Error: " + data.status;
+                        }
                         progressBar.classList.add("bg-danger");
                         isScanning = false;
                         document.getElementById('save-visual-btn').disabled = true;
