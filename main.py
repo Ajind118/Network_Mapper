@@ -839,6 +839,9 @@ def perform_visual_scan(target):
             update_scan_session(current_scan_id, 'completed', len(discovered_hosts), duration)
             logger.info(f"Visual scan completed: Found {len(discovered_hosts)} hosts in {duration} seconds")
 
+        with scan_lock:
+            scan_data["status"] = "done"
+
     except Exception as e:
         logger.error(f"Visual scan error: {e}")
         with scan_lock:
@@ -977,6 +980,15 @@ def visual_scan():
     if not target:
         return jsonify({"status": "error", "message": "No target specified"}), 400
     
+    reset_scan_data()
+    with scan_lock:
+        scan_data.update({
+            "status": "running",
+            "phase": "Initializing...",
+            "progress": 0,
+            "last_update": time.time()
+        })
+
     # Start visual scan in background thread
     active_scan_thread = threading.Thread(target=perform_visual_scan, args=(target,), daemon=True)
     active_scan_thread.start()
