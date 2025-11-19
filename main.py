@@ -455,7 +455,9 @@ def scan_single_host_fast(host):
         scanner = nmap.PortScanner()
         scanner.scan(hosts=host, arguments="-sn -T4 --max-retries 1 --host-timeout 5s")
         return host, host in scanner.all_hosts()
-    except:
+    except nmap.PortScannerError:
+        raise  # Propagate the error to be handled by the caller
+    except Exception:
         return host, False
 
 # --- Background Scan Logic ---
@@ -494,7 +496,8 @@ def perform_discovery_scan(target):
 
         discovered_hosts = []
         
-        with ThreadPoolExecutor(max_workers=30) as executor:
+        # Reduced max_workers to prevent system overload and improve stability
+        with ThreadPoolExecutor(max_workers=20) as executor:
             future_to_host = {executor.submit(scan_single_host_fast, host): host for host in all_hosts}
             
             for i, future in enumerate(as_completed(future_to_host)):
@@ -503,6 +506,14 @@ def perform_discovery_scan(target):
                     scanned_host, is_up = future.result()
                     if is_up:
                         discovered_hosts.append(scanned_host)
+                except nmap.PortScannerError:
+                    with scan_lock:
+                        scan_data["status"] = "error: 'nmap' is not installed. Please install it from https://nmap.org"
+                    if current_scan_id:
+                        update_scan_session(current_scan_id, 'error: nmap not found')
+                    # Cancel remaining tasks
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
                 except Exception as e:
                     print(f"Error scanning {host}: {e}")
                 
@@ -606,19 +617,16 @@ def perform_visual_scan(target):
                         # Add to graph in real-time (only if not gateway)
                         if scanned_host != gateway:
                             device_type = "unknown"
-                            try:
-                                # Fast device detection
-                                quick_scanner = nmap.PortScanner()
-                                quick_scanner.scan(hosts=scanned_host, arguments="-T4 -F --max-retries 1 --host-timeout 10s")
-                                if scanned_host in quick_scanner.all_hosts():
-                                    os_match = quick_scanner[scanned_host].get('osmatch', [])
-                                    if os_match: 
-                                        device_type = detect_device_type(os_match[0].get('name'))
-                                        
-                                    # Save device type to database for graph recreation
-                                    save_host_with_device_type(current_scan_id, scanned_host, device_type)
-                            except:
-                                pass
+                            # This also uses nmap, so it's wrapped in the same try-except
+                            quick_scanner = nmap.PortScanner()
+                            quick_scanner.scan(hosts=scanned_host, arguments="-T4 -F --max-retries 1 --host-timeout 10s")
+                            if scanned_host in quick_scanner.all_hosts():
+                                os_match = quick_scanner[scanned_host].get('osmatch', [])
+                                if os_match:
+                                    device_type = detect_device_type(os_match[0].get('name'))
+
+                                # Save device type to database for graph recreation
+                                save_host_with_device_type(current_scan_id, scanned_host, device_type)
                             
                             with graph_lock:
                                 network_graph["nodes"].append({
@@ -634,6 +642,14 @@ def perform_visual_scan(target):
                                     "to": scanned_host,
                                     "label": "connected"
                                 })
+                except nmap.PortScannerError:
+                    with scan_lock:
+                        scan_data["status"] = "error: 'nmap' is not installed. Please install it from https://nmap.org"
+                    if current_scan_id:
+                        update_scan_session(current_scan_id, 'error: nmap not found')
+                    # Cancel remaining tasks
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
                 except Exception as e:
                     print(f"Error scanning {host}: {e}")
                 
