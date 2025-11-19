@@ -508,28 +508,67 @@ def get_local_network():
         return "192.168.1.0/24"
 
 def get_default_gateway():
+    """
+    Get the default gateway IP address. Tries multiple methods for cross-platform compatibility.
+    """
+    gateway = None
     try:
         if platform.system() == "Windows":
-            result = subprocess.check_output("ipconfig", shell=True).decode()
-            match = re.search(r"Default Gateway.*: ([\d.]+)", result)
-            if match:
-                return match.group(1)
-        else:
-            result = subprocess.check_output(["ip", "route"]).decode()
-            match = re.search(r"default via ([\d.]+)", result)
-            if match:
-                return match.group(1)
-    except Exception as e:
-        logger.error(f"Error getting gateway: {e}")
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
+            try:
+                result = subprocess.check_output("ipconfig", shell=True, text=True, stderr=subprocess.DEVNULL)
+                match = re.search(r"Default Gateway.*: ([\d.]+)", result)
+                if match:
+                    gateway = match.group(1)
+                    if gateway != "0.0.0.0":
+                        return gateway
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass # Try next method
+
+            try:
+                result = subprocess.check_output(["route", "print", "-4"], shell=True, text=True, stderr=subprocess.DEVNULL)
+                match = re.search(r"^\s*0\.0\.0\.0\s*0\.0\.0\.0\s*([\d\.]+)\s*", result, re.MULTILINE)
+                if match:
+                    gateway = match.group(1)
+                    if gateway != "0.0.0.0":
+                        return gateway
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+        else: # Linux, macOS, etc.
+            try:
+                result = subprocess.check_output(["ip", "route"], text=True, stderr=subprocess.DEVNULL)
+                match = re.search(r"default via ([\d.]+) dev", result)
+                if match:
+                    return match.group(1)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+
+            try:
+                result = subprocess.check_output(["route", "-n"], text=True, stderr=subprocess.DEVNULL)
+                match = re.search(r"^0\.0\.0\.0\s+([\d\.]+)\s+0\.0\.0\.0\s+UG", result, re.MULTILINE)
+                if match:
+                    return match.group(1)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+
+    except Exception:
+        # This broad except is to catch any other unexpected OS-specific errors
+        pass
+        
+    # Fallback method: connect to an external server
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        if local_ip:
             parts = local_ip.split('.')
             return f"{parts[0]}.{parts[1]}.{parts[2]}.1"
-        except:
-            return "192.168.1.1"
+    except Exception as e:
+        logger.warning(f"Could not determine gateway using socket method: {e}")
+
+    # Final fallback
+    logger.warning("Could not determine gateway. Falling back to 192.168.1.1")
+    return "192.168.1.1"
 
 def detect_device_type(os_info):
     if not os_info:
@@ -839,6 +878,9 @@ def perform_visual_scan(target):
             update_scan_session(current_scan_id, 'completed', len(discovered_hosts), duration)
             logger.info(f"Visual scan completed: Found {len(discovered_hosts)} hosts in {duration} seconds")
 
+        with scan_lock:
+            scan_data["status"] = "done"
+
     except Exception as e:
         logger.error(f"Visual scan error: {e}")
         with scan_lock:
@@ -977,6 +1019,15 @@ def visual_scan():
     if not target:
         return jsonify({"status": "error", "message": "No target specified"}), 400
     
+    reset_scan_data()
+    with scan_lock:
+        scan_data.update({
+            "status": "running",
+            "phase": "Initializing...",
+            "progress": 0,
+            "last_update": time.time()
+        })
+
     # Start visual scan in background thread
     active_scan_thread = threading.Thread(target=perform_visual_scan, args=(target,), daemon=True)
     active_scan_thread.start()

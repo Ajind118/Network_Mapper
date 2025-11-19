@@ -397,25 +397,21 @@
                 alert("Please enter a target IP range.");
                 return;
             }
-            
-            resetScan();
-            
-            setTimeout(() => {
-                fetch("/api/visual_scan", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({target: target})
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === "error") {
-                        alert(data.message);
-                        return;
-                    }
-                    isScanning = true;
-                    pollStatus();
-                });
-            }, 500);
+
+            fetch("/api/visual_scan", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({target: target})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "error") {
+                    alert(data.message);
+                    return;
+                }
+                isScanning = true;
+                pollStatus(); // Start polling for status updates
+            });
         }
         
         function pollStatus() {
